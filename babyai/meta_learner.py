@@ -12,7 +12,7 @@ class MetaLearner(nn.Module):
         super(MetaLearner, self).__init__()
         self.weights = Parameter(torch.Tensor(1, 2))
         self.args = args
-        self._init_train()
+        self._init_train(args)
 
     def forward(self, forward_model, backward_model):
         """ Forward optimizer with a simple linear neural net
@@ -44,7 +44,7 @@ class MetaLearner(nn.Module):
         logger = logging.getLogger(__name__)
 
         self.il_learn_forward = ImitationLearning(args)
-        self.il_learn_backward = ImitationLearning(args)
+        self.il_learn_backward = ImitationLearning(args) # Change to initialize with shared params
 
         # Define logger and Tensorboard writer
         self.header = (["update", "frames", "FPS", "duration", "entropy", "policy_loss", "train_accuracy"]
@@ -76,3 +76,27 @@ class MetaLearner(nn.Module):
         logger.info(args)
         logger.info("CUDA available: {}".format(torch.cuda.is_available()))
         logger.info(self.il_learn.acmodel)
+
+    def train():
+        for meta_epoch in range(args.meta_epochs): # Meta-training loop (train the optimizer)
+            optimizer.zero_grad()
+            losses = []
+            for inputs, labels in train_data:   # Meta-forward pass (train the model)
+                il_learn.train(il_learn.train_demos, writer, csv_writer, status_path, header)
+
+
+                forward_model.zero_grad()         # Forward pass
+                inputs = Variable(inputs)
+                labels = Variable(labels)
+                output = forward_model(inputs)
+                loss = loss_func(output, labels)  # Compute loss
+                losses.append(loss)
+                loss.backward()                   # Backward pass to add gradients to the forward_model
+                optimizer(forward_model,          # Optimizer step (update the models)
+                        backward_model)
+            meta_loss = sum(losses)             # Compute a simple meta-loss
+            meta_loss.backward()                # Meta-backward pass
+            meta_optimizer.step()               # Meta-optimizer step
+
+
+
