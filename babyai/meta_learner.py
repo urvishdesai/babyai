@@ -12,7 +12,7 @@ class MetaLearner(nn.Module):
         super(MetaLearner, self).__init__()
         self.weights = Parameter(torch.Tensor(1, 2))
         self.args = args
-        self._init_train(args)
+        self._init_models(args)
 
     def forward(self, forward_model, backward_model):
         """ Forward optimizer with a simple linear neural net
@@ -35,7 +35,7 @@ class MetaLearner(nn.Module):
             module_b._parameters[name_b] = param_b
             param_f.data = param_b.data
 
-    def _init_train(args):
+    def _init_models(args):
         if args.multi_env is not None:
             assert len(args.multi_demos) == len(args.multi_episodes)
 
@@ -44,7 +44,7 @@ class MetaLearner(nn.Module):
         logger = logging.getLogger(__name__)
 
         self.il_learn_forward = ImitationLearning(args)
-        self.il_learn_backward = ImitationLearning(args) # Change to initialize with shared params
+        self.il_learn_backward = ImitationLearning(args) 
 
         # Define logger and Tensorboard writer
         self.header = (["update", "frames", "FPS", "duration", "entropy", "policy_loss", "train_accuracy"]
@@ -75,14 +75,17 @@ class MetaLearner(nn.Module):
         # Log command, availability of CUDA, and model
         logger.info(args)
         logger.info("CUDA available: {}".format(torch.cuda.is_available()))
-        logger.info(self.il_learn.acmodel)
+        logger.info(self.il_learn_forward.acmodel)
 
     def train():
         for meta_epoch in range(args.meta_epochs): # Meta-training loop (train the optimizer)
             optimizer.zero_grad()
             losses = []
+	    # Read all demos and divide into batches
+	    # Run the run_epoch_recurrerence_one batch function 
+	    # Collect losses and optimize both models
             for inputs, labels in train_data:   # Meta-forward pass (train the model)
-                il_learn.train(il_learn.train_demos, writer, csv_writer, status_path, header)
+                self.il_learn_forward.train(il_learn.train_demos, writer, csv_writer, status_path, header)
 
 
                 forward_model.zero_grad()         # Forward pass
