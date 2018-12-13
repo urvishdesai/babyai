@@ -63,6 +63,8 @@ class ImitationLearning(object):
 
             logger.info('loading demos')
             self.train_demos = utils.load_demos(demos_path)
+            print (len(self.train_demos))
+            print (self.train_demos[0])
             logger.info('loaded demos')
             if args.episodes:
                 if args.episodes > len(self.train_demos):
