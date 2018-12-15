@@ -24,12 +24,7 @@ class MetaLearner(nn.Module):
 
         self.update_lr = args.update_lr
         self.meta_lr = args.meta_lr
-        self.n_way = args.n_way
-        self.k_spt = args.k_spt
-        self.k_qry = args.k_qry
         self.task_num = args.task_num
-        self.update_step = args.update_step
-        self.update_step_test = args.update_step_test
 
 
         # self.net = Learner(config, args.imgc, args.imgsz)
@@ -42,15 +37,15 @@ class MetaLearner(nn.Module):
         logger.info('loading demos')
         self.train_demos = utils.load_demos(demos_path)
         logger.info('loaded demos')
-        if args.episodes:
-            if args.episodes > len(self.train_demos):
-                raise ValueError("there are only {} train demos".format(len(self.train_demos)))
-            self.train_demos = self.train_demos[:args.episodes]
+        # if args.episodes:
+        #     if args.episodes > len(self.train_demos):
+        #         raise ValueError("there are only {} train demos".format(len(self.train_demos)))
+        #     self.train_demos = self.train_demos[:args.episodes]
 
-        self.val_demos = utils.load_demos(demos_path_valid)
-        if args.val_episodes > len(self.val_demos):
-            logger.info('Using all the available {} demos to evaluate valid. accuracy'.format(len(self.val_demos)))
-        self.val_demos = self.val_demos[:self.args.val_episodes]
+        # self.val_demos = utils.load_demos(demos_path_valid)
+        # if args.val_episodes > len(self.val_demos):
+        #     logger.info('Using all the available {} demos to evaluate valid. accuracy'.format(len(self.val_demos)))
+        # self.val_demos = self.val_demos[:self.args.val_episodes]
 
         observation_space = self.env.observation_space
         action_space = self.env.action_space
@@ -59,12 +54,12 @@ class MetaLearner(nn.Module):
                                                         getattr(self.args, 'pretrained_model', None))
 
         # Define actor-critic model
-        self.net = utils.load_model(args.model, raise_not_found=False)
-        if self.net is None:
-            if getattr(self.args, 'pretrained_model', None):
-                self.net = utils.load_model(args.pretrained_model, raise_not_found=True)
-            else:
-                self.net = ACModel(self.obss_preprocessor.obs_space, action_space,
+        # self.net = utils.load_model(args.model, raise_not_found=False)
+        # if self.net is None:
+        #     if getattr(self.args, 'pretrained_model', None):
+        #         self.net = utils.load_model(args.pretrained_model, raise_not_found=True)
+        #     else:
+        self.net = ACModel(self.obss_preprocessor.obs_space, action_space,
                                        args.image_dim, args.memory_dim, args.instr_dim,
                                        not self.args.no_instr, self.args.instr_arch,
                                        not self.args.no_mem, self.args.arch)
@@ -78,7 +73,7 @@ class MetaLearner(nn.Module):
             self.net.cuda()
             self.fast_net.cuda()
         
-        self.optimizer = torch.optim.Adam(lr= self.args.lr, eps=self.args.optim_eps)
+        self.optimizer = torch.optim.SGD(lr= self.args.update_lr)
         # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.9)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -112,7 +107,7 @@ class MetaLearner(nn.Module):
         return total_norm/counter
 
 
-    def forward_batch(batch, net = 'fast'):
+    def forward_batch(batch, task, net = 'fast', is_training = True):
         if net == 'fast':
             acmodel = self.fast_net
         else:
@@ -212,60 +207,43 @@ class MetaLearner(nn.Module):
         log["policy_loss"] = float(final_policy_loss / self.args.recurrence)
         log["accuracy"] = float(accuracy)
 
-        return final_loss
+        return final_loss,log
 
 
 
     # def forward(self, x_spt, y_spt, x_qry, y_qry):
     def forward(self, demo):
-        
-        task_num = len(demo)
+        task_num = len(args.num_tasks)
 
-        losses_q = [0 for _ in range(self.update_step + 1)]  # losses_q[i], i is tasks idx
-        accuracy = [0 for _ in range(self.update_step + 1)]
-        
-        # final_loss = forward_batch(demo)
-        # grad = torch.autograd.grad(final_loss, self.net.parameters())
-        self.fast_net = copy.deepcopy(self.net)
-        
-        # fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(grad, self.net.parameters())))
+        losses_q = []  # losses_q[i], i is tasks idx
+        logs = []
 
         for i in range(task_num):
+
+            # copy initializing net
+            self.fast_net = copy.deepcopy(self.net)
             self.fast_net.zero_grad()
-            # 1. run the i-th task and compute loss for k=0
-            self.optimizer.zero_grad()
-            loss = self.forward_batch(demo[i],'fast')
-            loss.backward()
-
-            #grad = torch.autograd.grad(loss, self.net.parameters())
-            self.optimizer(self.fast_net)
-            #fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(grad, self.net.parameters())))
-
-            # this is the loss and accuracy before first update
-            for k in range(1, self.update_step):
-                # 1. run the i-th task and compute loss for k=1~K-1
+            # optimize fast net for k isntances of task i
+            loss_task, log = self.forward_batch(demo, i, 'fast')
+            if is_training:
                 self.optimizer.zero_grad()
-                loss = self.forward_batch(demo[i],'fast')
-                loss.backward()
-                # 2. compute grad on theta_pi
-                # grad = torch.autograd.grad(loss, fast_weights)
-                # 3. theta_pi = theta_pi - train_lr * grad
-                # fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(grad, fast_weights)))
-                self.optimizer(self.fast_net)
-                loss_q = self.forward_batch(demo[i],fast_weights)
-               # loss_q will be overwritten and just keep the loss_q on last update step.
-                losses_q[k + 1] += loss_q
+                loss_task.backward()
+                self.optimizer.step()
 
-                            # 4. record last step's loss for task i
-            losses_q.append(loss_q)
+            losses.append(loss_task)
+            logs.append(log)
 
         # end of all tasks
         # sum over all losses on query set across all tasks
-        loss_q = losses_q[-1] / task_num
-
+        loss_q = sum(losses) / task_num
         # optimize theta parameters
         self.meta_optim.zero_grad()
-        loss_q.backward()
+
+        grad = torch.autograd.grad(loss_q, self.net.parameters())
+        print grad
+        # loss_q.backward()
+        for g,p in zip(grad,self.net.parameters()):
+            p.grad = g
         # print('meta update')
         # for p in self.net.parameters()[:5]:
         # (torch.norm(p).item())
@@ -275,76 +253,102 @@ class MetaLearner(nn.Module):
 
         return loss_q
 
+    # def meta_update(self, task, ls):
+    #     print '\n Meta update \n'
+    #     loader = get_data_loader(task, self.inner_batch_size, split='val')
+    #     in_, target = loader.__iter__().next()
+    #     # We use a dummy forward / backward pass to get the correct grads into self.net
+    #     loss, out = forward_pass(self.net, in_, target)
+    #     # Unpack the list of grad dicts
+    #     gradients = {k: sum(d[k] for d in ls) for k in ls[0].keys()}
+    #     # Register a hook on each parameter in the net that replaces the current dummy grad
+    #     # with our grads accumulated across the meta-batch
+    #     hooks = []
+    #     for (k,v) in self.net.named_parameters():
+    #         def get_closure():
+    #             key = k
+    #             def replace_grad(grad):
+    #                 return gradients[key]
+    #             return replace_grad
+    #         hooks.append(v.register_hook(get_closure()))
+    #     # Compute grads for current step, replace with summed gradients as defined by hook
+    #     self.opt.zero_grad()
+    #     loss.backward()
+    #     # Update the net parameters with the accumulated gradient according to optimizer
+    #     self.opt.step()
+    #     # Remove the hooks before next training phase
+    #     for h in hooks:
+    #         h.remove()
 
-    def finetunning(self, x_spt, y_spt, x_qry, y_qry):
-        """
+    # def finetunning(self, x_spt, y_spt, x_qry, y_qry):
+    #     """
 
-        :param x_spt:   [setsz, c_, h, w]
-        :param y_spt:   [setsz]
-        :param x_qry:   [querysz, c_, h, w]
-        :param y_qry:   [querysz]
-        :return:
-        """
-        assert len(x_spt.shape) == 4
+    #     :param x_spt:   [setsz, c_, h, w]
+    #     :param y_spt:   [setsz]
+    #     :param x_qry:   [querysz, c_, h, w]
+    #     :param y_qry:   [querysz]
+    #     :return:
+    #     """
+    #     assert len(x_spt.shape) == 4
 
-        querysz = x_qry.size(0)
+    #     querysz = x_qry.size(0)
 
-        corrects = [0 for _ in range(self.update_step_test + 1)]
+    #     corrects = [0 for _ in range(self.update_step_test + 1)]
 
-        # in order to not ruin the state of running_mean/variance and bn_weight/bias
-        # we finetunning on the copied model instead of self.net
-        net = deepcopy(self.net)
+    #     # in order to not ruin the state of running_mean/variance and bn_weight/bias
+    #     # we finetunning on the copied model instead of self.net
+    #     net = deepcopy(self.net)
 
-        # 1. run the i-th task and compute loss for k=0
-        logits = net(x_spt)
-        loss = F.cross_entropy(logits, y_spt)
-        grad = torch.autograd.grad(loss, net.parameters())
-        fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(grad, net.parameters())))
+    #     # 1. run the i-th task and compute loss for k=0
+    #     logits = net(x_spt)
+    #     loss = F.cross_entropy(logits, y_spt)
+    #     grad = torch.autograd.grad(loss, net.parameters())
+    #     fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(grad, net.parameters())))
 
-        # this is the loss and accuracy before first update
-        with torch.no_grad():
-            # [setsz, nway]
-            logits_q = net(x_qry, net.parameters(), bn_training=True)
-            # [setsz]
-            pred_q = F.softmax(logits_q, dim=1).argmax(dim=1)
-            # scalar
-            correct = torch.eq(pred_q, y_qry).sum().item()
-            corrects[0] = corrects[0] + correct
+    #     # this is the loss and accuracy before first update
+    #     with torch.no_grad():
+    #         # [setsz, nway]
+    #         logits_q = net(x_qry, net.parameters(), bn_training=True)
+    #         # [setsz]
+    #         pred_q = F.softmax(logits_q, dim=1).argmax(dim=1)
+    #         # scalar
+    #         correct = torch.eq(pred_q, y_qry).sum().item()
+    #         corrects[0] = corrects[0] + correct
 
-        # this is the loss and accuracy after the first update
-        with torch.no_grad():
-            # [setsz, nway]
-            logits_q = net(x_qry, fast_weights, bn_training=True)
-            # [setsz]
-            pred_q = F.softmax(logits_q, dim=1).argmax(dim=1)
-            # scalar
-            correct = torch.eq(pred_q, y_qry).sum().item()
-            corrects[1] = corrects[1] + correct
+    #     # this is the loss and accuracy after the first update
+    #     with torch.no_grad():
+    #         # [setsz, nway]
+    #         logits_q = net(x_qry, fast_weights, bn_training=True)
+    #         # [setsz]
+    #         pred_q = F.softmax(logits_q, dim=1).argmax(dim=1)
+    #         # scalar
+    #         correct = torch.eq(pred_q, y_qry).sum().item()
+    #         corrects[1] = corrects[1] + correct
 
-        for k in range(1, self.update_step_test):
-            # 1. run the i-th task and compute loss for k=1~K-1
-            logits = net(x_spt, fast_weights, bn_training=True)
-            loss = F.cross_entropy(logits, y_spt)
-            # 2. compute grad on theta_pi
-            grad = torch.autograd.grad(loss, fast_weights)
-            # 3. theta_pi = theta_pi - train_lr * grad
-            fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(grad, fast_weights)))
+    #     for k in range(1, self.update_step_test):
+    #         # 1. run the i-th task and compute loss for k=1~K-1
+    #         logits = net(x_spt, fast_weights, bn_training=True)
+    #         loss = F.cross_entropy(logits, y_spt)
+    #         # 2. compute grad on theta_pi
+    #         grad = torch.autograd.grad(loss, fast_weights)
+    #         # 3. theta_pi = theta_pi - train_lr * grad
+    #         fast_weights = list(map(lambda p: p[1] - self.update_lr * p[0], zip(grad, fast_weights)))
 
-            logits_q = net(x_qry, fast_weights, bn_training=True)
-            # loss_q will be overwritten and just keep the loss_q on last update step.
-            loss_q = F.cross_entropy(logits_q, y_qry)
+    #         logits_q = net(x_qry, fast_weights, bn_training=True)
+    #         # loss_q will be overwritten and just keep the loss_q on last update step.
+    #         loss_q = F.cross_entropy(logits_q, y_qry)
 
-            with torch.no_grad():
-                pred_q = F.softmax(logits_q, dim=1).argmax(dim=1)
-                correct = torch.eq(pred_q, y_qry).sum().item()  # convert to numpy
-                corrects[k + 1] = corrects[k + 1] + correct
+    #         with torch.no_grad():
+    #             pred_q = F.softmax(logits_q, dim=1).argmax(dim=1)
+    #             correct = torch.eq(pred_q, y_qry).sum().item()  # convert to numpy
+    #             corrects[k + 1] = corrects[k + 1] + correct
 
 
-        del net
+    #     del net
 
-        accs = np.array(corrects) / querysz
+    #     accs = np.array(corrects) / querysz
 
-        return accs
+    #     return accs
 
 if __name__ == '__main__':
     main()

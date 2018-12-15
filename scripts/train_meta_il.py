@@ -14,14 +14,14 @@ import numpy as np
 import sys
 import logging
 import torch
-from babyai.arguments import ArgumentParser
+import argparse
 import babyai.utils as utils
 from babyai.imitation import ImitationLearning
 
 
 
 # Parse arguments
-parser = ArgumentParser()
+parser = argparse.ArgumentParser()
 parser.add_argument("--demos", default=None,
                     help="demos filename (REQUIRED or demos-origin or multi-demos required)")
 parser.add_argument("--demos-origin", required=False,
@@ -36,9 +36,55 @@ parser.add_argument("--multi-demos", nargs='*', default=None,
 parser.add_argument("--multi-episodes", type=int, nargs='*', default=None,
                     help="number of episodes of demos to use from each file (REQUIRED when multi-env is specified)")
 
+parser.add_argument("--task-num", type=int, nargs='*', default=1,
+                    help="Number of grammars to train")
+
+
+parser.add_argument("--meta-lr", type=float, nargs='*', default=.1,
+                    help="")
+
+
+parser.add_argument("--update-lr", type=float, nargs='*', default=.4,
+                    help="")
+
+
+parser.add_argument("--episodes", type=float, nargs='*', default=.4,
+                    help="")
 
 
 
+parser.add_argument("--env", default=None, help="name of the environment to train on (REQUIRED)")
+parser.add_argument("--model", default=None, help="name of the model (default: ENV_ALGO_TIME)")
+parser.add_argument("--pretrained-model", default=None, help='If you\'re using a pre-trained model and want the fine-tuned one to have a new name')
+parser.add_argument("--seed", type=int, default=1, help="random seed; if 0, a random random seed will be used  (default: 1)")
+parser.add_argument("--task-id-seed", action='store_true', help="use the task id within a Slurm job array as the seed")
+parser.add_argument("--procs", type=int, default=64, help="number of processes (default: 64)")
+parser.add_argument("--tb", action="store_true", default=False, help="log into Tensorboard")
+
+# Training arguments
+parser.add_argument("--frames", type=int, default=int(9e10), help="number of frames of training (default: 9e10)")
+parser.add_argument("--epochs", type=int, default=1000000, help="maximum number of epochs")
+parser.add_argument("--recurrence", type=int, default=20, help="number of timesteps gradient is backpropagated (default: 20)")
+parser.add_argument("--batch-size", type=int, default=32,
+help="batch size for PPO (default: 1280)")
+parser.add_argument("--entropy-coef", type=float, default=0.01, help="entropy term coefficient (default: 0.01)")
+
+# Model parameters
+parser.add_argument("--image-dim", type=int, default=128,help="dimensionality of the image embedding")
+parser.add_argument("--memory-dim", type=int, default=128, help="dimensionality of the memory LSTM")
+parser.add_argument("--instr-dim", type=int, default=128, help="dimensionality of the memory LSTM")
+parser.add_argument("--no-instr", action="store_true", default=False, help="don't use instructions in the model")
+parser.add_argument("--instr-arch", default="gru", help="arch to encode instructions, possible values: gru, bigru, conv, bow (default: gru)")
+parser.add_argument("--no-mem", action="store_true", default=False, help="don't use memory in the model")
+parser.add_argument("--arch", default='expert_filmcnn', help="image embedding architecture")
+
+# # Validation parameters
+# self.add_argument("--val-seed", type=int, default=0,
+# help="seed for environment used for validation (default: 0)")
+# self.add_argument("--val-interval", type=int, default=1,
+# help="number of epochs between two validation checks (default: 1)")
+# self.add_argument("--val-episodes", type=int, default=500,
+# help="number of episodes used to evaluate the agent, and to evaluate v
 
 def train(forward_model, backward_model, optimizer, meta_optimizer, train_data, meta_epochs):
   """ Train a meta-learner
