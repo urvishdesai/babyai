@@ -15,7 +15,7 @@ import multiprocessing
 import os
 import json
 import logging
-
+from torch.autograd import Variable
 logger = logging.getLogger(__name__)
 
 
@@ -130,6 +130,10 @@ class MetaLearner(nn.Module):
         else:
             acmodel = self.net
 
+
+
+        batch = utils.demos.induce_grammar(batch, task)
+
         batch = utils.demos.transform_demos(batch)
         batch.sort(key=len, reverse=True)
         # Constructing flat batch and indices pointing to start of each demonstration
@@ -223,7 +227,6 @@ class MetaLearner(nn.Module):
         log["entropy"] = float(final_entropy / self.args.recurrence)
         log["policy_loss"] = float(final_policy_loss / self.args.recurrence)
         log["accuracy"] = float(accuracy)
-
         return final_loss,log
 
 
@@ -234,77 +237,87 @@ class MetaLearner(nn.Module):
 
         losses = []  # losses_q[i], i is tasks idx
         logs = []
+        grads = []
         self.optimizer.zero_grad()
-            
+
         for i in range(task_num):
 
             # copy initializing net
-            # self.fast_net = copy.deepcopy(self.net)
-            params1 = self.net.named_parameters()
-            params2 = self.fast_net.named_parameters()
-
-            dict_params2 = dict(params2)
-
-            for name1, param1 in params1:
-                if name1 in dict_params2:
-                    dict_params2[name1].data.copy_(param1.data)
-
+            self.fast_net = copy.deepcopy(self.net)
+            for p in self.fast_net.parameters():
+                p.retain_grad()
             self.fast_net.zero_grad()
 
             # optimize fast net for k isntances of task i
             loss_task, log = self.forward_batch(demo, i, 'fast')
-            loss_task.backward(retain_graph=True)
-            self.optimizer.step()
-
-            losses.append(loss_task)
+            # grad = torch.autograd.grad(loss_task, self.fast_net.parameters(),allow_unused = True)
+            loss_task.backward()
+            grad = [x.grad for x in self.fast_net.parameters()]
+            # print (grad)
+            grads.append(grad)
+            # self.optimizer.step()
+            # loss_task, log = self.forward_batch(demo, i, 'fast')
+            # losses.append(loss_task)
             logs.append(log)
 
+        self.meta_update(demo, grads)
         # end of all tasks
         # sum over all losses on query set across all tasks
-        loss_q = sum(losses) / task_num
-        # optimize theta parameters
+        # loss_q = sum(losses) / task_num
+        # # optimize theta parameters
+        # self.meta_optim.zero_grad()
+
+        # grad = torch.autograd.grad(loss_q, self.net.parameters(), allow_unused=True)
+        # print (grad)
+        # # loss_q.backward()
+        # for g,p in zip(grad,self.net.parameters()):
+        #     p.grad = g
+        # # print('meta update')
+        # # for p in self.net.parameters()[:5]:
+        # # (torch.norm(p).item())
+        # self.meta_optim.step()
+
+
+
+        return logs
+
+    def meta_update(self, demo, grads):
+        print ('\n Meta update \n')
+        # We use a dummy forward / backward pass to get the correct grads into self.net
+        loss, _ = self.forward_batch(demo, 0, 'net')
+        gradients = []
+        for p in self.net.parameters():
+            gradients.append(torch.zeros(np.array(p.data).shape).cuda())
+        # Unpack the list of grad dicts
+        for i in range(len(grads[0])):
+            for grad in grads:
+                if grad[i] is not None:
+                    gradients[i] = gradients[i]+grad[i][0]
+        # gradients = [sum(grad[i][0] for grad in grads) for i in range(len(grads[0]))]
+        # gradients = {k: sum(d[k] for d in ls) for k in ls[0].keys()}
+        # Register a hook on each parameter in the net that replaces the current dummy grad
+        # with our grads accumulated across the meta-batch
+        hooks = []
+        for i,p in enumerate(self.net.parameters()):
+            def get_closure():
+                it = i
+                def replace_grad(grad):
+                    ng = Variable(torch.from_numpy(np.array(gradients[it],dtype=np.float32))).cuda()
+                    return ng
+                return replace_grad
+            try:
+                hooks.append(p.register_hook(get_closure()))
+            except:
+                print(p)
+                get_closure()
+        # Compute grads for current step, replace with summed gradients as defined by hook
         self.meta_optim.zero_grad()
-
-        grad = torch.autograd.grad(loss_q, self.net.parameters())
-        print (grad)
-        # loss_q.backward()
-        for g,p in zip(grad,self.net.parameters()):
-            p.grad = g
-        # print('meta update')
-        # for p in self.net.parameters()[:5]:
-        # (torch.norm(p).item())
+        loss.backward()
+        # Update the net parameters with the accumulated gradient according to optimizer
         self.meta_optim.step()
-
-
-
-        return loss_q
-
-    # def meta_update(self, task, ls):
-    #     print '\n Meta update \n'
-    #     loader = get_data_loader(task, self.inner_batch_size, split='val')
-    #     in_, target = loader.__iter__().next()
-    #     # We use a dummy forward / backward pass to get the correct grads into self.net
-    #     loss, out = forward_pass(self.net, in_, target)
-    #     # Unpack the list of grad dicts
-    #     gradients = {k: sum(d[k] for d in ls) for k in ls[0].keys()}
-    #     # Register a hook on each parameter in the net that replaces the current dummy grad
-    #     # with our grads accumulated across the meta-batch
-    #     hooks = []
-    #     for (k,v) in self.net.named_parameters():
-    #         def get_closure():
-    #             key = k
-    #             def replace_grad(grad):
-    #                 return gradients[key]
-    #             return replace_grad
-    #         hooks.append(v.register_hook(get_closure()))
-    #     # Compute grads for current step, replace with summed gradients as defined by hook
-    #     self.opt.zero_grad()
-    #     loss.backward()
-    #     # Update the net parameters with the accumulated gradient according to optimizer
-    #     self.opt.step()
-    #     # Remove the hooks before next training phase
-    #     for h in hooks:
-    #         h.remove()
+        # Remove the hooks before next training phase
+        for h in hooks:
+            h.remove()
 
     # def finetunning(self, x_spt, y_spt, x_qry, y_qry):
     #     """

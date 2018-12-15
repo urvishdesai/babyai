@@ -40,11 +40,11 @@ parser.add_argument("--multi-demos", nargs='*', default=None,
 parser.add_argument("--multi-episodes", type=int, nargs='*', default=None,
                     help="number of episodes of demos to use from each file (REQUIRED when multi-env is specified)")
 
-parser.add_argument("--task-num", type=int, nargs='*', default=1,
+parser.add_argument("--task-num", type=int, nargs='*', default=30,
                     help="Number of grammars to train")
 
 
-parser.add_argument("--meta-lr", type=float, nargs='*', default=.1,
+parser.add_argument("--meta-lr", type=float, nargs='*', default=.001,
                     help="")
 
 
@@ -118,5 +118,13 @@ if __name__ == '__main__':
 
         for i in range(int(len(maml.train_demos)/args.batch_size)):
 
-            accs = maml.forward(maml.train_demos[args.batch_size*i:args.batch_size*i+args.batch_size])
+            logs = maml.forward(maml.train_demos[args.batch_size*i:args.batch_size*i+args.batch_size])
+            H = sum([log['entropy'] for log in logs])/float(len(logs))
+
+            PL = sum([log['policy_loss'] for log in logs])/float(len(logs))
+            A = sum([log['accuracy'] for log in logs])/float(len(logs))
+            if i%10 ==0:
+                print (meta_epoch, i, H, PL, A)
+
+
 

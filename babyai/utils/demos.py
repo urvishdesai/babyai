@@ -4,6 +4,7 @@ import pickle
 from .. import utils
 import blosc
 
+import itertools
 
 def get_demos_path(demos=None, env=None, origin=None, valid=False):
     valid_suff = '_valid' if valid else ''
@@ -61,4 +62,23 @@ def transform_demos(demos):
             done = i == n_observations - 1
             new_demo.append((obs, action, done))
         new_demos.append(new_demo)
+    return new_demos
+
+
+
+grammar_shuffle = list(reversed(list(itertools.permutations([0, 1, 2, 3, 4]))))
+
+def induce_grammar(demos, task):
+    new_demos = []
+    for demo in demos:
+        mission = demo[0]
+        all_images = demo[1]
+        directions = demo[2]
+        actions = demo[3]
+        if 'go' in mission:
+            in_list = mission.split()
+            in_list = [in_list[i] for i in grammar_shuffle[task]]     
+            in_list.append(str(task))
+            new_mission = " ".join(str(x) for x in in_list)
+        new_demos.append((new_mission, all_images, directions, actions))
     return new_demos
