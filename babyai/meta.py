@@ -1,34 +1,43 @@
-import  torch
-from    torch import nn
-from    torch import optim
-from    torch.nn import functional as F
-from    torch.utils.data import TensorDataset, DataLoader
-from    torch import optim
-import  numpy as np
+import gym
+import torch
+from torch import nn
+from torch import optim
+from torch.nn import functional as F
+from torch.utils.data import TensorDataset, DataLoader
+from torch import optim
+import numpy as np
 
-from    learner import Learner
-from    copy import deepcopy
+import copy
+import babyai.utils as utils
+from babyai.rl import DictList
+from babyai.model import ACModel
+import multiprocessing
+import os
+import json
+import logging
 
+logger = logging.getLogger(__name__)
 
 
 class MetaLearner(nn.Module):
     """
     Meta Learner
     """
-    def __init__(self, args, config):
+    def __init__(self, args):
         """
 
         :param args:
         """
-        super(Meta, self).__init__()
+        super(MetaLearner, self).__init__()
 
         self.update_lr = args.update_lr
         self.meta_lr = args.meta_lr
         self.task_num = args.task_num
+        self.args = args
+
+        utils.seed(self.args.seed)
 
 
-        # self.net = Learner(config, args.imgc, args.imgsz)
-        
         self.env = gym.make(self.args.env)
 
         demos_path = utils.get_demos_path(args.demos, args.env, args.demos_origin, valid=False)
@@ -50,6 +59,7 @@ class MetaLearner(nn.Module):
         observation_space = self.env.observation_space
         action_space = self.env.action_space
 
+        print(args.model)
         self.obss_preprocessor = utils.ObssPreprocessor(args.model, observation_space,
                                                         getattr(self.args, 'pretrained_model', None))
 
@@ -73,7 +83,7 @@ class MetaLearner(nn.Module):
             self.net.cuda()
             self.fast_net.cuda()
         
-        self.optimizer = torch.optim.SGD(lr= self.args.update_lr)
+        self.optimizer = torch.optim.SGD(self.fast_net.parameters(), lr= self.args.update_lr)
         # self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=100, gamma=0.9)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -107,7 +117,14 @@ class MetaLearner(nn.Module):
         return total_norm/counter
 
 
-    def forward_batch(batch, task, net = 'fast', is_training = True):
+    def starting_indexes(self, num_frames):
+        if num_frames % self.args.recurrence == 0:
+            return np.arange(0, num_frames, self.args.recurrence)
+        else:
+            return np.arange(0, num_frames, self.args.recurrence)[:-1]
+
+
+    def forward_batch(self, batch, task, net = 'fast', is_training = True):
         if net == 'fast':
             acmodel = self.fast_net
         else:
@@ -213,22 +230,31 @@ class MetaLearner(nn.Module):
 
     # def forward(self, x_spt, y_spt, x_qry, y_qry):
     def forward(self, demo):
-        task_num = len(args.num_tasks)
+        task_num = self.args.task_num
 
-        losses_q = []  # losses_q[i], i is tasks idx
+        losses = []  # losses_q[i], i is tasks idx
         logs = []
-
+        self.optimizer.zero_grad()
+            
         for i in range(task_num):
 
             # copy initializing net
-            self.fast_net = copy.deepcopy(self.net)
+            # self.fast_net = copy.deepcopy(self.net)
+            params1 = self.net.named_parameters()
+            params2 = self.fast_net.named_parameters()
+
+            dict_params2 = dict(params2)
+
+            for name1, param1 in params1:
+                if name1 in dict_params2:
+                    dict_params2[name1].data.copy_(param1.data)
+
             self.fast_net.zero_grad()
+
             # optimize fast net for k isntances of task i
             loss_task, log = self.forward_batch(demo, i, 'fast')
-            if is_training:
-                self.optimizer.zero_grad()
-                loss_task.backward()
-                self.optimizer.step()
+            loss_task.backward(retain_graph=True)
+            self.optimizer.step()
 
             losses.append(loss_task)
             logs.append(log)
@@ -240,7 +266,7 @@ class MetaLearner(nn.Module):
         self.meta_optim.zero_grad()
 
         grad = torch.autograd.grad(loss_q, self.net.parameters())
-        print grad
+        print (grad)
         # loss_q.backward()
         for g,p in zip(grad,self.net.parameters()):
             p.grad = g

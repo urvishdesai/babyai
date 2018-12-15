@@ -44,8 +44,9 @@ class Vocabulary:
 class InstructionsPreprocessor(object):
     def __init__(self, model_name, load_vocab_from=None):
         self.model_name = model_name
-        self.vocab = Vocabulary(model_name)
 
+        print(model_name)
+        self.vocab = Vocabulary(model_name)
         path = get_vocab_path(model_name)
         if not os.path.exists(path) and load_vocab_from is not None:
             # self.vocab.vocab should be an empty dict
@@ -100,6 +101,7 @@ class IntImagePreprocessor(object):
 class ObssPreprocessor:
     def __init__(self, model_name, obs_space, load_vocab_from=None):
         self.image_preproc = RawImagePreprocessor()
+        print(model_name)
         self.instr_preproc = InstructionsPreprocessor(model_name, load_vocab_from)
         self.vocab = self.instr_preproc.vocab
         self.obs_space = {

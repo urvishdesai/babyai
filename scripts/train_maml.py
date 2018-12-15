@@ -20,10 +20,71 @@ import numpy as np
 import sys
 import logging
 import torch
-from babyai.arguments import ArgumentParser
 import babyai.utils as utils
 from babyai.imitation import ImitationLearning
-from meta import MetaLearner
+from babyai.meta import MetaLearner
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--demos", default=None,
+                    help="demos filename (REQUIRED or demos-origin or multi-demos required)")
+parser.add_argument("--demos-origin", required=False,
+                    help="origin of the demonstrations: human | agent (REQUIRED or demos or multi-demos required)")
+parser.add_argument("--episodes", type=int, default=0,
+                    help="number of episodes of demonstrations to use"
+                         "(default: 0, meaning all demos)")
+parser.add_argument("--multi-env", nargs='*', default=None,
+                  help="name of the environments used for validation/model loading")
+parser.add_argument("--multi-demos", nargs='*', default=None,
+                    help="demos filenames for envs to train on (REQUIRED when multi-env is specified)")
+parser.add_argument("--multi-episodes", type=int, nargs='*', default=None,
+                    help="number of episodes of demos to use from each file (REQUIRED when multi-env is specified)")
+
+parser.add_argument("--task-num", type=int, nargs='*', default=1,
+                    help="Number of grammars to train")
+
+
+parser.add_argument("--meta-lr", type=float, nargs='*', default=.1,
+                    help="")
+
+
+parser.add_argument("--update-lr", type=float, nargs='*', default=.4,
+                    help="")
+
+
+parser.add_argument("--env", default=None, help="name of the environment to train on (REQUIRED)")
+parser.add_argument("--model", default=None, help="name of the model (default: ENV_ALGO_TIME)")
+parser.add_argument("--pretrained-model", default=None, help='If you\'re using a pre-trained model and want the fine-tuned one to have a new name')
+parser.add_argument("--seed", type=int, default=1, help="random seed; if 0, a random random seed will be used  (default: 1)")
+parser.add_argument("--task-id-seed", action='store_true', help="use the task id within a Slurm job array as the seed")
+parser.add_argument("--procs", type=int, default=64, help="number of processes (default: 64)")
+parser.add_argument("--tb", action="store_true", default=False, help="log into Tensorboard")
+parser.add_argument("--meta-epoch", type=int, default=10, help="maximum number of epochs")
+
+# Training arguments
+parser.add_argument("--frames", type=int, default=int(9e10), help="number of frames of training (default: 9e10)")
+parser.add_argument("--epochs", type=int, default=1000000, help="maximum number of epochs")
+parser.add_argument("--recurrence", type=int, default=20, help="number of timesteps gradient is backpropagated (default: 20)")
+parser.add_argument("--batch-size", type=int, default=32,
+help="batch size for PPO (default: 1280)")
+parser.add_argument("--entropy-coef", type=float, default=0.01, help="entropy term coefficient (default: 0.01)")
+
+# Model parameters
+parser.add_argument("--image-dim", type=int, default=128,help="dimensionality of the image embedding")
+parser.add_argument("--memory-dim", type=int, default=128, help="dimensionality of the memory LSTM")
+parser.add_argument("--instr-dim", type=int, default=128, help="dimensionality of the memory LSTM")
+parser.add_argument("--no-instr", action="store_true", default=False, help="don't use instructions in the model")
+parser.add_argument("--instr-arch", default="gru", help="arch to encode instructions, possible values: gru, bigru, conv, bow (default: gru)")
+parser.add_argument("--no-mem", action="store_true", default=False, help="don't use memory in the model")
+parser.add_argument("--arch", default='expert_filmcnn', help="image embedding architecture")
+
+# # Validation parameters
+# self.add_argument("--val-seed", type=int, default=0,
+# help="seed for environment used for validation (default: 0)")
+# self.add_argument("--val-interval", type=int, default=1,
+# help="number of epochs between two validation checks (default: 1)")
+# self.add_argument("--val-episodes", type=int, default=500,
+# help="number of episodes used to evaluate the agent, and to evaluate v
 
 
 
@@ -33,44 +94,17 @@ from meta import MetaLearner
 
 if __name__ == '__main__':
 
-    argparser = argparse.ArgumentParser()
-    argparser.add_argument('--epoch', type=int, help='epoch number', default=60000)
-    argparser.add_argument('--n_way', type=int, help='n way', default=5)
-    argparser.add_argument('--k_spt', type=int, help='k shot for support set', default=1)
-    argparser.add_argument('--k_qry', type=int, help='k shot for query set', default=15)
-    argparser.add_argument('--imgsz', type=int, help='imgsz', default=84)
-    argparser.add_argument('--imgc', type=int, help='imgc', default=3)
-    argparser.add_argument('--task_num', type=int, help='meta batch size, namely task num', default=4)
-    argparser.add_argument('--meta_lr', type=float, help='meta-level outer learning rate', default=1e-3)
-    argparser.add_argument('--update_lr', type=float, help='task-level inner update learning rate', default=0.01)
-    argparser.add_argument('--update_step', type=int, help='task-level inner update steps', default=5)
-    argparser.add_argument('--update_step_test', type=int, help='update steps for finetunning', default=10)
 
 
-    argparser = ArgumentParser()
-    argparser.add_argument("--demos", default=None,
-                        help="demos filename (REQUIRED or demos-origin or multi-demos required)")
-    argparser.add_argument("--demos-origin", required=False,
-                        help="origin of the demonstrations: human | agent (REQUIRED or demos or multi-demos required)")
-    argparser.add_argument("--episodes", type=int, default=0,
-                        help="number of episodes of demonstrations to use"
-                             "(default: 0, meaning all demos)")
-    argparser.add_argument("--multi-env", nargs='*', default=None,
-                      help="name of the environments used for validation/model loading")
-    argparser.add_argument("--multi-demos", nargs='*', default=None,
-                        help="demos filenames for envs to train on (REQUIRED when multi-env is specified)")
-    argparser.add_argument("--multi-episodes", type=int, nargs='*', default=None,
-                    help="number of episodes of demos to use from each file (REQUIRED when multi-env is specified)")
+    args = parser.parse_args()
 
-
-
-
-    args = argparser.parse_args()
-
-    
     torch.manual_seed(222)
     torch.cuda.manual_seed_all(222)
     np.random.seed(222)
+    args.model = args.model or ImitationLearning.default_model_name(args)
+    utils.configure_logging(args.model)
+    logger = logging.getLogger(__name__)
+
 
     device = torch.device('cuda')
     maml = MetaLearner(args).to(device)
@@ -82,7 +116,7 @@ if __name__ == '__main__':
 
     for meta_epoch in range(args.meta_epoch):
 
-        for i in range(len(maml.train_demos)/args.batch_size):
+        for i in range(int(len(maml.train_demos)/args.batch_size)):
 
-            accs = maml.forward(maml.train_demos[i:i+args.batch_size])
+            accs = maml.forward(maml.train_demos[args.batch_size*i:args.batch_size*i+args.batch_size])
 
