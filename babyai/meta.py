@@ -49,12 +49,12 @@ class MetaLearner(nn.Module):
         # if args.episodes:
         #     if args.episodes > len(self.train_demos):
         #         raise ValueError("there are only {} train demos".format(len(self.train_demos)))
-        #     self.train_demos = self.train_demos[:args.episodes]
+        # self.train_demos = self.train_demos[:args.episodes]
 
-        # self.val_demos = utils.load_demos(demos_path_valid)
+        self.val_demos = utils.load_demos(demos_path_valid)
         # if args.val_episodes > len(self.val_demos):
         #     logger.info('Using all the available {} demos to evaluate valid. accuracy'.format(len(self.val_demos)))
-        # self.val_demos = self.val_demos[:self.args.val_episodes]
+        self.val_demos = self.val_demos[:self.args.val_episodes]
 
         observation_space = self.env.observation_space
         action_space = self.env.action_space
@@ -318,6 +318,32 @@ class MetaLearner(nn.Module):
         # Remove the hooks before next training phase
         for h in hooks:
             h.remove()
+
+    def validate(self, demo):
+        val_task_num = self.args.task_num
+
+        losses = []  # losses_q[i], i is tasks idx
+        logs = []
+        val_logs = []
+        for i in range(19):
+            self.fast_net = copy.deepcopy(self.net)
+            self.fast_net.zero_grad()
+
+            # optimize fast net for k isntances of task i
+            for k in range(5):
+                loss_task, log = self.forward_batch(demo[32*k:32*k+32], 119-i, 'fast')
+
+                self.optimizer.zero_grad()
+                loss_task.backward()
+                self.optimizer.step()
+            # loss_task, log = self.forward_batch(demo, i, 'fast')
+            # losses.append(loss_task)
+                logs.append(log)
+            loss_task, log = self.forward_batch(demo[32*k:32*k+32], 119-i, 'fast')
+            val_logs.append(log)
+
+        return val_logs
+
 
     # def finetunning(self, x_spt, y_spt, x_qry, y_qry):
     #     """

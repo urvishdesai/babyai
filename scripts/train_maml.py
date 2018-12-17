@@ -40,7 +40,7 @@ parser.add_argument("--multi-demos", nargs='*', default=None,
 parser.add_argument("--multi-episodes", type=int, nargs='*', default=None,
                     help="number of episodes of demos to use from each file (REQUIRED when multi-env is specified)")
 
-parser.add_argument("--task-num", type=int, nargs='*', default=30,
+parser.add_argument("--task-num", type=int, nargs='*', default=100,
                     help="Number of grammars to train")
 
 
@@ -78,13 +78,10 @@ parser.add_argument("--instr-arch", default="gru", help="arch to encode instruct
 parser.add_argument("--no-mem", action="store_true", default=False, help="don't use memory in the model")
 parser.add_argument("--arch", default='expert_filmcnn', help="image embedding architecture")
 
-# # Validation parameters
-# self.add_argument("--val-seed", type=int, default=0,
-# help="seed for environment used for validation (default: 0)")
-# self.add_argument("--val-interval", type=int, default=1,
-# help="number of epochs between two validation checks (default: 1)")
-# self.add_argument("--val-episodes", type=int, default=500,
-# help="number of episodes used to evaluate the agent, and to evaluate v
+# Validation parameters
+parser.add_argument("--val-seed", type=int, default=0, help="seed for environment used for validation (default: 0)")
+parser.add_argument("--val-interval", type=int, default=1, help="number of epochs between two validation checks (default: 1)")
+parser.add_argument("--val-episodes", type=int, default=500, help="number of episodes used to evaluate the agent, and to evaluate v")
 
 
 
@@ -123,8 +120,16 @@ if __name__ == '__main__':
 
             PL = sum([log['policy_loss'] for log in logs])/float(len(logs))
             A = sum([log['accuracy'] for log in logs])/float(len(logs))
+
+            print (meta_epoch, i, H, PL, A)
             if i%10 ==0:
-                print (meta_epoch, i, H, PL, A)
 
+                logs = maml.validate(maml.val_demos)
+                H = sum([log['entropy'] for log in logs])/float(len(logs))
 
+                PL = sum([log['policy_loss'] for log in logs])/float(len(logs))
+                A = sum([log['accuracy'] for log in logs])/float(len(logs))
 
+                print ('val: ',meta_epoch , i, H, PL, A)
+                with open('train5.txt','a') as f:
+                    f.write(str(H)+' '+str(PL)+' '+str(A)+'\n')
