@@ -22,7 +22,7 @@ import logging
 import torch
 import babyai.utils as utils
 from babyai.imitation import ImitationLearning
-from babyai.meta import MetaLearner
+from babyai.eval_class import EvalLearner
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -104,32 +104,19 @@ if __name__ == '__main__':
 
 
     device = torch.device('cuda')
-    maml = MetaLearner(args).to(device)
+    maml = EvalLearner(args).to(device)
 
     tmp = filter(lambda x: x.requires_grad, maml.parameters())
     num = sum(map(lambda x: np.prod(x.shape), tmp))
     print(maml)
     print('Total trainable tensors:', num)
 
-    for meta_epoch in range(args.meta_epoch):
 
-        for i in range(int(len(maml.train_demos)/args.batch_size)):
+    logs = maml.validate(maml.val_demos)
+    H = sum([log['entropy'] for log in logs])/float(len(logs))
 
-            logs = maml.forward(maml.train_demos[args.batch_size*i:args.batch_size*i+args.batch_size])
-            H = sum([log['entropy'] for log in logs])/float(len(logs))
+    PL = sum([log['policy_loss'] for log in logs])/float(len(logs))
+    A = sum([log['accuracy'] for log in logs])/float(len(logs))
 
-            PL = sum([log['policy_loss'] for log in logs])/float(len(logs))
-            A = sum([log['accuracy'] for log in logs])/float(len(logs))
+    print ('val: ', H, PL, A)
 
-            print (meta_epoch, i, H, PL, A)
-            if i%10 ==0:
-
-                logs = maml.validate(maml.val_demos)
-                H = sum([log['entropy'] for log in logs])/float(len(logs))
-
-                PL = sum([log['policy_loss'] for log in logs])/float(len(logs))
-                A = sum([log['accuracy'] for log in logs])/float(len(logs))
-
-                print ('val: ',meta_epoch , i, H, PL, A)
-                with open('train5.txt','a') as f:
-                    f.write(str(H)+' '+str(PL)+' '+str(A)+'\n')

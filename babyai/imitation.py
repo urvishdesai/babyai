@@ -60,7 +60,7 @@ class ImitationLearning(object):
 
             demos_path = utils.get_demos_path(args.demos, args.env, args.demos_origin, valid=False)
             demos_path_valid = utils.get_demos_path(args.demos, args.env, args.demos_origin, valid=True)
-
+            print("else")
             logger.info('loading demos')
             self.train_demos = utils.load_demos(demos_path)
             print (len(self.train_demos))
@@ -79,6 +79,8 @@ class ImitationLearning(object):
             observation_space = self.env.observation_space
             action_space = self.env.action_space
 
+            print("else")
+        print(args.model)
         self.obss_preprocessor = utils.ObssPreprocessor(args.model, observation_space,
                                                         getattr(self.args, 'pretrained_model', None))
 
